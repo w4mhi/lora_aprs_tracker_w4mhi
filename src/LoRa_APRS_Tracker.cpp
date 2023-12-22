@@ -12,6 +12,7 @@
 #include "display.h"
 #include "pins.h"
 #include "power_management.h"
+#include "maidenhead.h"
 
 #define VERSION "23.36.01"
 
@@ -43,9 +44,11 @@ String create_lat_aprs_dao(RawDegrees lat);
 String create_long_aprs_dao(RawDegrees lng);
 String create_dao_aprs(RawDegrees lat, RawDegrees lng);
 String createDateString(time_t t);
+String createDateStringMDY(time_t t);
 String createTimeString(time_t t);
 String getSmartBeaconState();
 String padding(unsigned int number, unsigned int width);
+String getTxFrequency();
 
 static bool send_update          = true;
 static bool display_toggle_value = true;
@@ -60,10 +63,46 @@ static void handle_next_beacon() {
 }
 
 static void toggle_display() {
-  display_toggle_value = !display_toggle_value;
-  display_toggle(display_toggle_value);
+  //display_toggle_value = !display_toggle_value;
+  //display_toggle(display_toggle_value);
   if (display_toggle_value) {
-    setup_display();
+  //  setup_display();
+  //}
+  //else {
+    LatLong ll;
+    ll.lat_d = gps.location.lat();
+    ll.lng_d = gps.location.lng();
+    char maid[MAID_CHARLEN];
+    ll2maidenhead (maid, ll);
+    String maid_grid(maid);
+    String lat = create_lat_aprs_dao(gps.location.rawLat());
+    String lng = create_long_aprs_dao(gps.location.rawLng());
+
+    String alt = "";
+    int alt_int = max(-99999, min(999999, (int)gps.altitude.feet()));
+    if (alt_int < 0) {
+      alt = "-" + padding(alt_int * -1, 5) + "ft";
+    } else {
+      alt = padding(alt_int, 6) + "ft";
+    }
+
+    String course_and_speed = "";
+
+    int speed_int = max(0, min(999, (int)gps.speed.knots()));
+    if (speed_int > 0) {
+      String speed = padding(speed_int, 3);
+      int course_int = max(0, min(360, (int)gps.course.deg()));
+      /* course in between 1..360 due to aprs spec */
+      if (course_int == 0) {
+        course_int = 360;
+      }
+      String course = padding(course_int, 3);
+      course_and_speed = course + "deg:" + speed + "mph";
+    }
+    else {
+      course_and_speed = "n/a:0mph";
+    }
+    show_display(BeaconMan.getCurrentBeaconConfig()->callsign, "lat:  " + lat, "long: " + lng, "c&s:  " + course_and_speed, "alt:  " + alt, "grid: " + maid_grid, 5000);;
   }
 }
 
@@ -335,14 +374,15 @@ void loop() {
   if (gps_time_update) {
 
     show_display(BeaconMan.getCurrentBeaconConfig()->callsign,
-                 createDateString(now()) + "   " + createTimeString(now()),
+                 createDateStringMDY(now()) + "UTC" + createTimeString(now()),
                  String("Sats: ") + gps.satellites.value() + " HDOP: " + gps.hdop.hdop(),
                  String("Next Bcn: ") + (BeaconMan.getCurrentBeaconConfig()->smart_beacon.active ? "~" : "") + createTimeString(nextBeaconTimeStamp),
                  BatteryIsConnected ? (String("Bat: ") + batteryVoltage + "V, " + batteryChargeCurrent + "mA") : "Powered via USB",
-                 String("Smart Beacon: " + getSmartBeaconState()));
+                 //String("Smart Beacon: " + getSmartBeaconState())
+                 String("Tx: ") + getTxFrequency() + " Hz");
 
     Serial.println(BeaconMan.getCurrentBeaconConfig()->callsign);
-    Serial.println(createDateString(now()) + "   " + createTimeString(now()));
+    Serial.println(createDateString(now()) + "UTC" + createTimeString(now()));
     Serial.println(String("Sats: ") + gps.satellites.value() + " HDOP: " + gps.hdop.hdop());
     Serial.println(String("Next Bcn: ") + (BeaconMan.getCurrentBeaconConfig()->smart_beacon.active ? "~" : "") + createTimeString(nextBeaconTimeStamp));
     Serial.println(BatteryIsConnected ? (String("Bat: ") + batteryVoltage + "V, " + batteryChargeCurrent + "mA") : "Powered via USB");
@@ -532,6 +572,10 @@ String createDateString(time_t t) {
   return String(padding(day(t), 2) + "." + padding(month(t), 2) + "." + padding(year(t), 4));
 }
 
+String createDateStringMDY(time_t t) {
+  return String(padding(month(t), 2) + "/" + padding(day(t), 2) + "/" + padding(year(t), 4));
+}
+
 String createTimeString(time_t t) {
   return String(padding(hour(t), 2) + ":" + padding(minute(t), 2) + ":" + padding(second(t), 2));
 }
@@ -554,4 +598,13 @@ String padding(unsigned int number, unsigned int width) {
   }
   result.concat(num);
   return result;
+}
+
+String getTxFrequency() {
+  char str[10];
+  
+  long freq = Config.lora.frequencyTx;
+  sprintf(str, "%ld", freq);
+  String lng_str(str);
+  return lng_str;
 }
